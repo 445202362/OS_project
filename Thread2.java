@@ -1,101 +1,88 @@
-import java.util.HashSet;
+package os;
+
 import java.util.LinkedList;
-import java.util.Set;
 
 public class Thread2 extends Thread {
 
-```
-private final LinkedList<PCB> jobQueue;
-private final LinkedList<PCB> readyQueue;
+	private final LinkedList<PCB> jobQueue;
+	private final LinkedList<PCB> readyQueue;
+	private final MemoryManager memoryManager;
+	private final int totalProcesses;
 
-private static final int TOTAL_MEMORY = 2048;
-private int usedMemory = 0;
-private final Set<Integer> freedProcesses = new HashSet<>();
+	public Thread2(LinkedList<PCB> jobQueue, LinkedList<PCB> readyQueue, MemoryManager memoryManager,
+			int totalProcesses) {
+		this.jobQueue = jobQueue;
+		this.readyQueue = readyQueue;
+		this.memoryManager = memoryManager;
+		this.totalProcesses = totalProcesses;
+	}
 
-public Thread2(LinkedList<PCB> jobQueue, LinkedList<PCB> readyQueue) {
-    this.jobQueue = jobQueue;
-    this.readyQueue = readyQueue;
-}
+	@Override
+	public void run() {
+		System.out.println("Thread 2: Started.");
 
-@Override
-public void run() {
-    System.out.println("Thread 2: Started.");
+		while (true) {
 
-    while (true) {
+			PCB nextJob = null;
 
-        PCB nextJob = null;
+			synchronized (jobQueue) {
+				if (!jobQueue.isEmpty()) {
+					nextJob = jobQueue.getFirst();
+				}
+			}
 
-        synchronized (jobQueue) {
-            if (!jobQueue.isEmpty()) {
-                nextJob = jobQueue.getFirst();
-            }
-        }
+			if (nextJob != null) {
+				boolean allocated = memoryManager.allocate(nextJob.getId(), nextJob.getRequiredMemory());
 
-        if (nextJob != null) {
-            int required = nextJob.getRequiredMemory();
+				if (allocated) {
+					synchronized (jobQueue) {
+						if (!jobQueue.isEmpty() && jobQueue.getFirst() == nextJob) {
+							jobQueue.removeFirst();
+						} else {
+							memoryManager.deallocate(nextJob.getId(), nextJob.getRequiredMemory());
+							continue;
+						}
+					}
 
-            if (usedMemory + required <= TOTAL_MEMORY) {
+					nextJob.setState(PCB.State.READY);
 
-                synchronized (jobQueue) {
-                    if (!jobQueue.isEmpty() && jobQueue.getFirst() == nextJob) {
-                        jobQueue.removeFirst();
-                    } else {
-                        continue;
-                    }
-                }
+					synchronized (readyQueue) {
+						readyQueue.addLast(nextJob);
+						System.out.println("Thread 2: P" + nextJob.getId() + " admitted to ready queue.");
+					}
+				}
+			}
 
-                usedMemory += required;
-                nextJob.setState(PCB.State.READY);
+			boolean jobQueueEmpty;
+			synchronized (jobQueue) {
+				jobQueueEmpty = jobQueue.isEmpty();
+			}
 
-                synchronized (readyQueue) {
-                    readyQueue.addLast(nextJob);
-                    System.out.println("Thread 2: Process " + nextJob.getId()
-                            + " admitted. Memory used: " + usedMemory + "/" + TOTAL_MEMORY + " MB");
-                }
+			if (jobQueueEmpty && memoryManager.getCompleted() == totalProcesses) {
+				System.out.println("Thread 2: All processes admitted and completed. Terminating.");
+				break;
+			}
 
-            } else {
-                System.out.println("Thread 2: Not enough memory for Process "
-                        + nextJob.getId() + ". Waiting...");
-            }
-        }
+			boolean shouldWait = false;
 
-        synchronized (readyQueue) {
-            for (PCB p : readyQueue) {
-                if (p.getState() == PCB.State.TERMINATED && !freedProcesses.contains(p.getId())) {
-                    usedMemory -= p.getRequiredMemory();
-                    freedProcesses.add(p.getId());
-                }
-            }
-        }
+			synchronized (jobQueue) {
+				if (jobQueue.isEmpty()) {
+					shouldWait = true;
+				} else {
+					if (memoryManager.getAvailable() < jobQueue.getFirst().getRequiredMemory()) {
+						shouldWait = true;
+					}
+				}
+			}
 
-        boolean jobQueueEmpty;
-        synchronized (jobQueue) {
-            jobQueueEmpty = jobQueue.isEmpty();
-        }
-
-        boolean allCompleted;
-        synchronized (readyQueue) {
-            allCompleted = jobQueueEmpty &&
-                    readyQueue.stream().allMatch(p -> p.getState() == PCB.State.TERMINATED);
-        }
-
-        if (allCompleted) {
-            System.out.println("Thread 2: All processes completed. Terminating.");
-            break;
-        }
-
-        try {
-            Thread.sleep(1);
-        } catch (InterruptedException e) {
-            System.out.println("Thread 2: Interrupted.");
-            break;
-        }
-    }
-}
-
-public int getUsedMemory() {
-    return usedMemory;
-}
-```
-
+			if (shouldWait) {
+				try {
+					Thread.sleep(1);
+				} catch (InterruptedException e) {
+					System.out.println("Thread 2: Interrupted.");
+					break;
+				}
+			}
+		}
+	}
 }
